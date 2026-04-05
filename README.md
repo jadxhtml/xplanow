@@ -20,7 +20,7 @@
 ### Bước 4.1: Khởi chạy Backend (Server)
 1. Mở terminal, di chuyển vào thư mục backend: `cd be`
 2. Cài đặt các thư viện cần thiết: `npm install`
-3. Cấu hình file biến môi trường: Đổi tên file `.env.example` thành `.env` (Đảm bảo chuỗi kết nối MongoDB là chính xác, mặc định: `mongodb://localhost:27017/taskapp_pro`).
+3. Cấu hình file biến môi trường: Đổi tên file `.env.example` thành `.env` (Đảm bảo chuỗi kết nối MongoDB là chính xác, mặc định: `mongodb://127.0.0.1:27017/TaskApp_Capstone`).
 4. Khởi chạy server: `npm run dev` (hoặc `npm start`)
 -> Server sẽ chạy tại: http://localhost:5000
 
