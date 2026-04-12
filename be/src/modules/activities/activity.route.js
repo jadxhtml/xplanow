@@ -5,6 +5,6 @@ const { protect } = require('../../middleware/auth.middleware');
 
 router.use(protect);
 
-router.get('/', activityController.getUserActivities);
+router.get('/', protect, activityController.getActivities);
 
 module.exports = router;

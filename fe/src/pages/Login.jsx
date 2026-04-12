@@ -42,7 +42,7 @@ const Login = () => {
         <div className="min-h-screen bg-gray-100 flex items-center justify-center">
             <Card className="w-full max-w-md shadow-lg rounded-xl">
                 <div className="text-center mb-6">
-                    <h1 className="text-2xl font-bold text-blue-600">TaskApp Pro</h1>
+                    <h1 className="text-2xl font-bold text-blue-600">PlanEr</h1>
                     <p className="text-gray-500">Đăng nhập để quản lý Mục tiêu & Công việc</p>
                 </div>
 

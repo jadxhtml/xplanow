@@ -15,8 +15,17 @@ exports.createTask = async (req, res) => {
     try {
         const task = await taskService.createTask(req.body, req.user.id);
 
-        // 👉 Đã sửa: Dùng đúng biến 'task' và 'req.user.id'
-        await logActivity(req.user.id, 'CREATE', 'TASK', `Đã tạo công việc: ${task.title}`);
+        // 👉 Lấy groupId từ body hoặc query
+        const groupId = req.body.groupId || req.query.groupId;
+
+        await logActivity(
+            req.user.id,
+            'CREATE',
+            'Task',
+            task._id,
+            `Đã tạo công việc: ${task.title}`,
+            groupId // 👉 THÊM GROUP ID VÀO ĐÂY
+        );
 
         res.status(201).json(task);
     } catch (error) {
@@ -26,14 +35,32 @@ exports.createTask = async (req, res) => {
 
 exports.updateTask = async (req, res) => {
     try {
-        const task = await taskService.updateTask(req.params.id, req.body, req.user.id);
+        const taskId = req.params.id;
+        const userId = req.user.id || req.user._id;
+        const updateData = req.body;
 
-        // 👉 Đã sửa: Dùng đúng biến 'task'
-        if (req.body.status === 'done') {
-            await logActivity(req.user.id, 'COMPLETE', 'TASK', `Đã hoàn thành công việc: ${task.title} 🎯`);
-        } else {
-            await logActivity(req.user.id, 'UPDATE', 'TASK', `Đã cập nhật công việc: ${task.title}`);
+        // 👉 Lấy groupId từ body hoặc query
+        const groupId = req.body.groupId || req.query.groupId;
+
+        const oldTask = await Task.findById(taskId);
+        if (!oldTask) {
+            return res.status(404).json({ message: "Không tìm thấy công việc" });
         }
+        const oldStatus = oldTask.status;
+
+        const task = await taskService.updateTask(taskId, updateData, userId);
+
+        if (updateData.status && updateData.status !== oldStatus) {
+            if (updateData.status === 'done') {
+                await logActivity(userId, 'COMPLETE_TASK', 'Task', task._id, `Đã hoàn thành công việc: ${task.title}`, groupId);
+            } else {
+                await logActivity(userId, 'UPDATE_STATUS', 'Task', task._id, `Chuyển trạng thái "${task.title}" từ ${oldStatus} sang ${updateData.status}`, groupId);
+            }
+        } else {
+            // 👉 THÊM GROUP ID VÀO ĐÂY CHO CẬP NHẬT BÌNH THƯỜNG
+            await logActivity(userId, 'UPDATE', 'Task', task._id, `Đã cập nhật thông tin công việc: ${task.title}`, groupId);
+        }
+
         res.status(200).json(task);
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -42,10 +69,27 @@ exports.updateTask = async (req, res) => {
 
 exports.deleteTask = async (req, res) => {
     try {
-        // 👉 Đã sửa: Đổi tên biến thành 'result' cho khớp với lệnh trả về ở dưới
-        const result = await taskService.deleteTask(req.params.id, req.user.id);
+        const taskId = req.params.id;
+        const userId = req.user.id || req.user._id;
 
-        await logActivity(req.user.id, 'DELETE', 'TASK', `Đã xóa một công việc khỏi hệ thống`);
+        // 👉 Lấy groupId từ body hoặc query
+        const groupId = req.query.groupId || req.body?.groupId;
+
+        const taskToDelete = await Task.findById(taskId);
+        if (!taskToDelete) {
+            return res.status(404).json({ message: "Không tìm thấy công việc" });
+        }
+
+        const result = await taskService.deleteTask(taskId, userId);
+
+        await logActivity(
+            userId,
+            'DELETE',
+            'Task',
+            taskId,
+            `Đã xóa công việc: "${taskToDelete.title}"`,
+            groupId // 👉 THÊM GROUP ID VÀO ĐÂY
+        );
 
         res.status(200).json(result);
     } catch (error) {

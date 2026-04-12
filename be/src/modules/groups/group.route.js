@@ -6,8 +6,10 @@ const { protect } = require('../../middleware/auth.middleware');
 router.use(protect);
 
 router.post('/', groupController.createGroup);
-router.get('/', groupController.getUserGroups);
+router.get('/user', groupController.getUserGroups);
 router.get('/:id', groupController.getGroupById);
 router.post('/:id/members', groupController.addMember);
+router.get('/:groupId/performance', protect, groupController.getPerformance);
+router.delete('/:id/members/:memberId', protect, groupController.removeMember);
 
 module.exports = router;

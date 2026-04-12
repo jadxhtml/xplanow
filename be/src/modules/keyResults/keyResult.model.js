@@ -33,7 +33,12 @@ const keyResultSchema = new mongoose.Schema({
     },
     deadline: {
         type: Date
-    }
+    },
+    assignee: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
 
 }, {
     timestamps: true

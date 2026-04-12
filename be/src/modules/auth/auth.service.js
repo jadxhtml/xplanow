@@ -101,7 +101,9 @@ exports.googleLogin = async (idToken) => {
                 role: 'user'
             });
         }
-        const accessToken = generateToken(user._id);
+        const accessToken = generateTokens(user._id);
+        user.refreshToken = tokens.refreshToken;
+        await user.save();
 
         return {
             user: {

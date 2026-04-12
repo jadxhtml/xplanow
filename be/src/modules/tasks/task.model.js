@@ -42,6 +42,11 @@ const taskSchema = new mongoose.Schema({
     deadline: {
         type: Date
     },
+    assignee: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
     startTime: {
         type: Date,
         default: Date.now

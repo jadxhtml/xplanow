@@ -35,6 +35,10 @@ const objectiveSchema = new mongoose.Schema({
         ref: 'Group',
         default: null
     },
+    assignees: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
     deadline: {
         type: Date
     }

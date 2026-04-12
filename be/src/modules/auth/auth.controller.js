@@ -1,4 +1,5 @@
 const authService = require('./auth.service');
+const jwt = require('jsonwebtoken');
 
 exports.register = async (req, res) => {
     try {
@@ -22,13 +23,19 @@ exports.login = async (req, res) => {
 };
 
 exports.refreshToken = async (req, res) => {
-    const { refreshToken } = req.body;
-    if (!refreshToken) return res.status(401).json({ message: "Không có Refresh Token" });
-
     try {
-        const accessToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-        res.json({ accessToken });
-    } catch (e) { res.status(403).json({ message: "Refresh Token không hợp lệ" }); }
+        const { refreshToken } = req.body;
+        if (!refreshToken) return res.status(401).json({ message: "Không có Refresh Token" });
+
+        // Gọi thẳng hàm từ service của bạn
+        const tokens = await authService.refreshAccessToken(refreshToken);
+
+        // Nó trả về cả accessToken và refreshToken mới
+        res.status(200).json(tokens);
+    } catch (error) {
+        console.error("Lỗi Refresh Token:", error.message);
+        res.status(403).json({ message: "Refresh Token không hợp lệ hoặc đã hết hạn" });
+    }
 };
 
 exports.googleLogin = async (req, res) => {

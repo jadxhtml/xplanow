@@ -1,13 +1,8 @@
 const mongoose = require('mongoose');
 
 const groupSchema = new mongoose.Schema({
-    name: {
-        type: String,
-        required: true
-    },
-    description: {
-        type: String
-    },
+    name: { type: String, required: true },
+    description: { type: String },
 
     // danh sach thanh vien trong nhom
     members: [{

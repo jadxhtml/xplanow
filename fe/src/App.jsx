@@ -8,6 +8,7 @@ import Overview from './pages/Overview';
 import ChatBox from './components/ChatBox';
 import Groups from './pages/Groups';
 import GroupDetail from './pages/GroupDetail';
+import Workspace from './pages/Workspace';
 
 function App() {
   return (
@@ -17,8 +18,7 @@ function App() {
         <Route path='/register' element={<Register />} />
         <Route path="/" element={
           <>
-            <MainLayout />
-            <ChatBox />
+            <Workspace />
           </>
         }>
 

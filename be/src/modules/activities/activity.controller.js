@@ -1,9 +1,19 @@
 const activityService = require('./activity.service');
 
-exports.getUserActivities = async (req, res) => {
+// Đổi tên hàm thành getActivities cho chuẩn (nếu file route của bạn đang gọi tên khác thì giữ nguyên tên cũ nhé)
+exports.getActivities = async (req, res) => {
     try {
-        //lay 50 log gan nhat cua tai khoan dang dang nhap
-        const activities = await activityService.getUserActivities(req.user.id);
+        // 👉 1. BẮT BUỘC PHẢI LẤY groupId TỪ REQUEST
+        const { groupId } = req.query;
+
+        // 👉 2. Tường lửa ngăn rò rỉ dữ liệu
+        if (!groupId || groupId === 'undefined') {
+            return res.status(200).json([]);
+        }
+
+        // 👉 3. GỌI ĐÚNG HÀM CỦA NHÓM (Thay vì gọi getUserActivities)
+        const activities = await activityService.getGroupActivities(groupId);
+
         res.status(200).json(activities);
     } catch (error) {
         res.status(500).json({ message: error.message });

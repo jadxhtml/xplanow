@@ -31,7 +31,7 @@ const Register = () => {
             <Card className="w-full max-w-md shadow-lg rounded-xl">
                 {/* Header giống hệt trang Login */}
                 <div className="text-center mb-6">
-                    <h1 className="text-2xl font-bold text-blue-600">TaskApp Pro</h1>
+                    <h1 className="text-2xl font-bold text-blue-600">PlanEr</h1>
                     <p className="text-gray-500">Tạo tài khoản để quản lý Mục tiêu & Công việc</p>
                 </div>
 
