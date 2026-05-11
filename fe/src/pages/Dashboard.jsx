@@ -14,9 +14,32 @@ const ITEM_TYPE_CONFIG = {
 const Dashboard = ({ groupId, members }) => {
     const [treeData, setTreeData] = useState([]);
     const [loading, setLoading] = useState(false);
-    const [expandedKeys, setExpandedKeys] = useState([]);
+    const [expandedKeys, setExpandedKeys] = useState(() => {
+        const saved = localStorage.getItem(`planer_expanded_${groupId}`);
+        return saved ? JSON.parse(saved) : [];
+    });
     const [isCreateOpen, setIsCreateOpen] = useState(false);
-    const [subConfig, setSubConfig] = useState({ open: false, type: '', parentId: null, parentTitle: '' });
+
+    // 👉 1. STATE AI ĐƯỢC NÂNG CẤP ĐỂ HỖ TRỢ BƯỚC REVIEW
+    const [aiConfig, setAiConfig] = useState({
+        open: false,
+        record: null,
+        prompt: '',
+        loading: false,
+        step: 'input', // 'input' hoặc 'review'
+        generatedTasks: [],
+        aiMessage: ''
+    });
+
+    const [subConfig, setSubConfig] = useState({
+        open: false,
+        type: '',
+        parentId: null,
+        parentTitle: '',
+        parentItemType: '',
+        krId: null
+    });
+
     const [editConfig, setEditConfig] = useState({ open: false, record: null });
     const [createForm] = Form.useForm();
     const [subForm] = Form.useForm();
@@ -69,13 +92,18 @@ const Dashboard = ({ groupId, members }) => {
         return () => socket.off('new_activity', fetchTreeData);
     }, [groupId]);
 
+    useEffect(() => {
+        if (groupId) {
+            localStorage.setItem(`planer_expanded_${groupId}`, JSON.stringify(expandedKeys));
+        }
+    }, [expandedKeys, groupId]);
+
     const toggleExpand = (key) =>
         setExpandedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
 
     const handleCreateSubmit = async (values) => {
         try {
             if (values.deadline) values.deadline = values.deadline.toISOString();
-            // Nếu là objective, mảng phụ trách là assignees
             const payload = { ...values, group: groupId };
             if (values.assignee) payload.assignees = [values.assignee];
 
@@ -92,16 +120,32 @@ const Dashboard = ({ groupId, members }) => {
     const handleOpenSubModal = (record) => {
         subForm.resetFields();
         const type = record.itemType === 'objective' ? 'keyResult' : 'task';
-        setSubConfig({ open: true, type, parentId: record._id, parentTitle: record.title });
+        const krId = record.itemType === 'keyResult' ? record._id : record.keyResult;
+        setSubConfig({
+            open: true, type, parentId: record._id, parentTitle: record.title, parentItemType: record.itemType, krId: krId
+        });
     };
 
     const handleSubSubmit = async (values) => {
         try {
             if (values.deadline) values.deadline = values.deadline.toISOString();
-            const endpoint = subConfig.type === 'keyResult' ? '/key-results' : '/tasks';
-            const payload = subConfig.type === 'keyResult'
-                ? { ...values, objective: subConfig.parentId, groupId: groupId }
-                : { ...values, keyResult: subConfig.parentId, groupId: groupId };
+            let endpoint, payload;
+
+            if (subConfig.type === 'keyResult') {
+                endpoint = '/key-results';
+                payload = { ...values, objective: subConfig.parentId, group: groupId, groupId: groupId };
+            } else {
+                endpoint = '/tasks';
+                payload = { ...values, group: groupId, groupId: groupId };
+                if (subConfig.parentItemType === 'keyResult') {
+                    payload.keyResult = subConfig.parentId;
+                    payload.parent = null;
+                } else if (subConfig.parentItemType === 'task') {
+                    payload.keyResult = subConfig.krId;
+                    payload.parent = subConfig.parentId;
+                }
+            }
+
             await api.post(endpoint, payload);
             message.success('Đã thêm thành công');
             setSubConfig(p => ({ ...p, open: false }));
@@ -113,18 +157,10 @@ const Dashboard = ({ groupId, members }) => {
 
     const handleOpenEdit = (record) => {
         setEditConfig({ open: true, record });
-
-        // 👉 Đọc đúng trường assignee (cho Task/KR) hoặc assignees (cho Objective)
         const currentAssignee = record.assignee?._id || record.assignee || record.assignees?.[0]?._id || record.assignees?.[0];
-
         editForm.setFieldsValue({
-            title: record.title,
-            description: record.description,
-            targetValue: record.targetValue,
-            currentValue: record.currentValue || 0,
-            unit: record.unit,
-            deadline: record.deadline ? dayjs(record.deadline) : null,
-            assignee: currentAssignee // Đẩy vào form sửa
+            title: record.title, description: record.description, targetValue: record.targetValue, currentValue: record.currentValue || 0,
+            unit: record.unit, deadline: record.deadline ? dayjs(record.deadline) : null, assignee: currentAssignee
         });
     };
 
@@ -133,10 +169,8 @@ const Dashboard = ({ groupId, members }) => {
             if (values.deadline) values.deadline = values.deadline.toISOString();
             const { record } = editConfig;
             const ep = record.itemType === 'objective' ? `/objectives/${record._id}`
-                : record.itemType === 'keyResult' ? `/key-results/${record._id}`
-                    : `/tasks/${record._id}`;
+                : record.itemType === 'keyResult' ? `/key-results/${record._id}` : `/tasks/${record._id}`;
 
-            // Xử lý riêng cho objective vì nó dùng mảng assignees
             const payload = { ...values, groupId: groupId };
             if (record.itemType === 'objective' && values.assignee) {
                 payload.assignees = [values.assignee];
@@ -163,8 +197,7 @@ const Dashboard = ({ groupId, members }) => {
     const handleDelete = async (record) => {
         try {
             const ep = record.itemType === 'objective' ? `/objectives/${record._id}`
-                : record.itemType === 'keyResult' ? `/key-results/${record._id}`
-                    : `/tasks/${record._id}`;
+                : record.itemType === 'keyResult' ? `/key-results/${record._id}` : `/tasks/${record._id}`;
             await api.delete(`${ep}?groupId=${groupId}`);
             message.success('Đã xóa thành công');
             fetchTreeData();
@@ -183,8 +216,7 @@ const Dashboard = ({ groupId, members }) => {
         const isOverdue = today.isAfter(deadline);
         const isNear = diff >= 0 && diff <= 2;
         const cfg = isOverdue ? { bg: '#fee2e2', color: '#991b1b', suffix: ' (Trễ)' }
-            : isNear ? { bg: '#ffedd5', color: '#9a3412', suffix: ' (Sắp đến)' }
-                : { bg: '#dbeafe', color: '#1e40af', suffix: '' };
+            : isNear ? { bg: '#ffedd5', color: '#9a3412', suffix: ' (Sắp đến)' } : { bg: '#dbeafe', color: '#1e40af', suffix: '' };
         return (
             <span style={{ display: 'inline-block', fontSize: 11, padding: '2px 8px', borderRadius: 4, background: cfg.bg, color: cfg.color }}>
                 {deadline.format('DD/MM/YYYY')}{cfg.suffix}
@@ -217,12 +249,21 @@ const Dashboard = ({ groupId, members }) => {
     const ActionCell = ({ record }) => (
         <div style={{ display: 'flex', gap: 2 }}>
             {record.itemType !== 'task' && (
-                <Tooltip title="Thêm việc con">
-                    <button onClick={() => handleOpenSubModal(record)} style={btnStyle}>
-                        <PlusOutlined style={{ fontSize: 12 }} />
+                <Tooltip title="Nhờ AI phân rã công việc">
+                    <button
+                        onClick={() => setAiConfig({ open: true, record, prompt: '', loading: false, step: 'input', generatedTasks: [], aiMessage: '' })}
+                        style={{ ...btnStyle, color: '#8b5cf6', background: '#f5f3ff', fontWeight: 'bold' }}
+                    >
+                        AI
                     </button>
                 </Tooltip>
             )}
+
+            <Tooltip title="Thêm việc con">
+                <button onClick={() => handleOpenSubModal(record)} style={btnStyle}>
+                    <PlusOutlined style={{ fontSize: 12 }} />
+                </button>
+            </Tooltip>
             <Tooltip title="Chỉnh sửa">
                 <button onClick={() => handleOpenEdit(record)} style={btnStyle}>
                     <EditOutlined style={{ fontSize: 12 }} />
@@ -239,9 +280,8 @@ const Dashboard = ({ groupId, members }) => {
     );
 
     const btnStyle = {
-        width: 26, height: 26, borderRadius: 5, border: 'none',
-        background: 'transparent', cursor: 'pointer', display: 'flex',
-        alignItems: 'center', justifyContent: 'center', color: '#9ca3af',
+        width: 26, height: 26, borderRadius: 5, border: 'none', background: 'transparent', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af',
     };
 
     const flattenTree = (items, depth = 0) => {
@@ -258,9 +298,96 @@ const Dashboard = ({ groupId, members }) => {
     };
 
     const flatRows = flattenTree(treeData);
-
     const rowBg = { objective: '#f0f5ff', keyResult: '#faf9ff', task: '#fff' };
     const titleWeight = { objective: 500, keyResult: 400, task: 400 };
+
+    // =========================================================================
+    // 👉 2. CÁC HÀM XỬ LÝ LOGIC AI (GỌI API, CHỌN CHECKBOX, GIAO VIỆC VÀ LƯU)
+    // =========================================================================
+    const handleAIGenerate = async () => {
+        if (!aiConfig.prompt.trim()) return message.warning('Vui lòng nhập yêu cầu cho AI');
+
+        setAiConfig(prev => ({ ...prev, loading: true, aiMessage: '' }));
+        try {
+            const payload = { prompt: aiConfig.prompt, members: members };
+            const res = await api.post('/tasks/ai-generate', payload);
+            const aiData = res.data;
+
+            if (aiData.isError) {
+                message.error("Yêu cầu không hợp lệ!");
+                setAiConfig(prev => ({ ...prev, loading: false, aiMessage: aiData.message }));
+            } else {
+                const tasksWithSelection = aiData.tasks.map(t => ({
+                    ...t, selected: true, children: t.children?.map(c => ({ ...c, selected: true })) || []
+                }));
+                setAiConfig(prev => ({
+                    ...prev, loading: false, step: 'review', generatedTasks: tasksWithSelection,
+                    aiMessage: aiData.message || "Tuyệt vời! Dưới đây là danh sách công việc đề xuất:"
+                }));
+            }
+        } catch (error) {
+            message.error(error.response?.data?.message || 'Lỗi kết nối với AI');
+            setAiConfig(prev => ({ ...prev, loading: false }));
+        }
+    };
+
+    const handleToggleAITask = (taskIndex, childIndex, checked) => {
+        const newTasks = [...aiConfig.generatedTasks];
+        if (childIndex === null) {
+            newTasks[taskIndex].selected = checked;
+            if (!checked && newTasks[taskIndex].children) {
+                newTasks[taskIndex].children.forEach(c => c.selected = false);
+            }
+        } else {
+            newTasks[taskIndex].children[childIndex].selected = checked;
+        }
+        setAiConfig(p => ({ ...p, generatedTasks: newTasks }));
+    };
+
+    const handleAssignAITask = (taskIndex, childIndex, userId) => {
+        const newTasks = [...aiConfig.generatedTasks];
+        if (childIndex === null) newTasks[taskIndex].assignee = userId;
+        else newTasks[taskIndex].children[childIndex].assignee = userId;
+        setAiConfig(p => ({ ...p, generatedTasks: newTasks }));
+    };
+
+    const handleSaveAITasks = async () => {
+        setAiConfig(p => ({ ...p, loading: true }));
+        try {
+            const { record, generatedTasks } = aiConfig;
+            const tasksToSave = [];
+
+            generatedTasks.forEach(task => {
+                if (task.selected) {
+                    const parent = { ...task };
+                    if (parent.children) {
+                        parent.children = parent.children.filter(c => c.selected);
+                    }
+                    tasksToSave.push(parent);
+                }
+            });
+
+            if (tasksToSave.length === 0) {
+                message.warning("Bạn chưa chọn công việc nào để lưu!");
+                setAiConfig(p => ({ ...p, loading: false }));
+                return;
+            }
+
+            const payload = {
+                tasks: tasksToSave, groupId: groupId,
+                objectiveId: record.itemType === 'objective' ? record._id : null,
+                keyResultId: record.itemType === 'keyResult' ? record._id : null,
+            };
+
+            await api.post('/tasks/ai-save', payload);
+            message.success("Đã phân rã và lưu công việc thành công!");
+            setAiConfig({ open: false, record: null, prompt: '', loading: false, step: 'input', generatedTasks: [], aiMessage: '' });
+            fetchTreeData();
+        } catch (error) {
+            message.error("Lỗi khi lưu công việc");
+            setAiConfig(p => ({ ...p, loading: false }));
+        }
+    };
 
     return (
         <div style={{ background: '#fff', border: '0.5px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
@@ -303,8 +430,6 @@ const Dashboard = ({ groupId, members }) => {
                             <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, fontSize: 13, color: '#9ca3af' }}>Chưa có mục tiêu nào. Hãy tạo mục tiêu đầu tiên.</td></tr>
                         ) : flatRows.map(row => {
                             const typeCfg = ITEM_TYPE_CONFIG[row.itemType] || {};
-
-                            // 👉 TÌM ĐÚNG NGƯỜI PHỤ TRÁCH (ASSIGNEE)
                             let assignedPerson = null;
                             const targetId = row.assignee || (row.assignees?.length > 0 ? row.assignees[0] : null);
 
@@ -319,63 +444,32 @@ const Dashboard = ({ groupId, members }) => {
                             const avatarUrl = assignedPerson?.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${assigneeName === 'Chưa phân công' ? '?' : assigneeName}`;
 
                             return (
-                                <tr
-                                    key={row.key}
-                                    style={{ background: rowBg[row.itemType] || '#fff', cursor: row.hasChildren ? 'pointer' : 'default' }}
-                                    onDoubleClick={() => { if (row.hasChildren) toggleExpand(row.key); }}
-                                >
+                                <tr key={row.key} style={{ background: rowBg[row.itemType] || '#fff', cursor: row.hasChildren ? 'pointer' : 'default' }} onDoubleClick={() => { if (row.hasChildren) toggleExpand(row.key); }}>
                                     <td style={{ padding: `9px 14px 9px ${14 + row.depth * 20}px`, borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                             {row.hasChildren ? (
-                                                <span
-                                                    onClick={() => toggleExpand(row.key)}
-                                                    style={{ width: 14, fontSize: 10, color: '#9ca3af', cursor: 'pointer', flexShrink: 0, userSelect: 'none' }}
-                                                >
+                                                <span onClick={() => toggleExpand(row.key)} style={{ width: 14, fontSize: 10, color: '#9ca3af', cursor: 'pointer', flexShrink: 0, userSelect: 'none' }}>
                                                     {row.isExpanded ? '▾' : '▸'}
                                                 </span>
-                                            ) : (
-                                                <span style={{ width: 14, flexShrink: 0 }} />
-                                            )}
-                                            <span style={{
-                                                fontSize: row.itemType === 'task' ? 12 : 13,
-                                                fontWeight: titleWeight[row.itemType],
-                                                color: row.status === 'done' ? '#9ca3af' : row.itemType === 'objective' ? '#111827' : row.itemType === 'keyResult' ? '#374151' : '#6b7280',
-                                                textDecoration: row.status === 'done' ? 'line-through' : 'none',
-                                            }}>
+                                            ) : <span style={{ width: 14, flexShrink: 0 }} />}
+                                            <span style={{ fontSize: row.itemType === 'task' ? 12 : 13, fontWeight: titleWeight[row.itemType], color: row.status === 'done' ? '#9ca3af' : row.itemType === 'objective' ? '#111827' : row.itemType === 'keyResult' ? '#374151' : '#6b7280', textDecoration: row.status === 'done' ? 'line-through' : 'none' }}>
                                                 {row.title}
                                             </span>
                                         </div>
                                     </td>
                                     <td style={{ padding: '9px 14px', borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}>
-                                        <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 4, background: typeCfg.bg, color: typeCfg.color }}>
-                                            {typeCfg.label}
-                                        </span>
+                                        <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 4, background: typeCfg.bg, color: typeCfg.color }}>{typeCfg.label}</span>
                                     </td>
                                     <td style={{ padding: '9px 14px', borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}>
-                                        {/* Avatar của người được giao (Assignee) */}
                                         <Tooltip title={assigneeName}>
-                                            <div style={{
-                                                width: 26, height: 26, borderRadius: '50%', border: '1px dashed #d9d9d9',
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                background: assignedPerson ? 'transparent' : '#fafafa', cursor: 'pointer'
-                                            }}>
-                                                {assignedPerson ? (
-                                                    <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                                                ) : (
-                                                    <UserOutlined style={{ fontSize: 12, color: '#bfbfbf' }} />
-                                                )}
+                                            <div style={{ width: 26, height: 26, borderRadius: '50%', border: '1px dashed #d9d9d9', display: 'flex', alignItems: 'center', justifyContent: 'center', background: assignedPerson ? 'transparent' : '#fafafa', cursor: 'pointer' }}>
+                                                {assignedPerson ? <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} /> : <UserOutlined style={{ fontSize: 12, color: '#bfbfbf' }} />}
                                             </div>
                                         </Tooltip>
                                     </td>
-                                    <td style={{ padding: '9px 14px', borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}>
-                                        <ProgressCell record={row} />
-                                    </td>
-                                    <td style={{ padding: '9px 14px', borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}>
-                                        <DeadlineCell text={row.deadline} record={row} />
-                                    </td>
-                                    <td style={{ padding: '9px 14px', borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}>
-                                        <ActionCell record={row} />
-                                    </td>
+                                    <td style={{ padding: '9px 14px', borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}><ProgressCell record={row} /></td>
+                                    <td style={{ padding: '9px 14px', borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}><DeadlineCell text={row.deadline} record={row} /></td>
+                                    <td style={{ padding: '9px 14px', borderBottom: '0.5px solid #f3f4f6', verticalAlign: 'middle' }}><ActionCell record={row} /></td>
                                 </tr>
                             );
                         })}
@@ -383,109 +477,166 @@ const Dashboard = ({ groupId, members }) => {
                 </table>
             </div>
 
-            {/* CÁC MODAL */}
             <Modal title="Tạo mục tiêu mới" open={isCreateOpen} onCancel={() => setIsCreateOpen(false)} onOk={() => createForm.submit()} okText="Tạo mới" cancelText="Hủy">
                 <Form form={createForm} layout="vertical" onFinish={handleCreateSubmit}>
-                    <Form.Item name="title" label="Tên mục tiêu" rules={[{ required: true, message: 'Vui lòng nhập tên' }]}>
-                        <Input placeholder="Ví dụ: Hoàn thành đồ án điểm A" />
-                    </Form.Item>
-                    <Form.Item name="description" label="Mô tả">
-                        <Input.TextArea rows={3} placeholder="Mô tả ngắn gọn về mục tiêu này..." />
-                    </Form.Item>
+                    <Form.Item name="title" label="Tên mục tiêu" rules={[{ required: true, message: 'Vui lòng nhập tên' }]}><Input placeholder="Ví dụ: Hoàn thành đồ án điểm A" /></Form.Item>
+                    <Form.Item name="description" label="Mô tả"><Input.TextArea rows={3} placeholder="Mô tả ngắn gọn về mục tiêu này..." /></Form.Item>
                     <div style={{ display: 'flex', gap: 12 }}>
-                        <Form.Item name="deadline" label="Hạn chót (tùy chọn)" style={{ flex: 1 }}>
-                            <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} placeholder="Chọn ngày..." />
-                        </Form.Item>
-                        <Form.Item name="assignee" label="Người phụ trách" style={{ flex: 1 }}>
-                            <Select placeholder="Giao cho ai?" allowClear>
-                                {members?.map(m => (
-                                    <Select.Option key={m.user._id} value={m.user._id}>{m.user.username}</Select.Option>
-                                ))}
-                            </Select>
-                        </Form.Item>
+                        <Form.Item name="deadline" label="Hạn chót (tùy chọn)" style={{ flex: 1 }}><DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} placeholder="Chọn ngày..." /></Form.Item>
+                        <Form.Item name="assignee" label="Người phụ trách" style={{ flex: 1 }}><Select placeholder="Giao cho ai?" allowClear>{members?.map(m => (<Select.Option key={m.user._id} value={m.user._id}>{m.user.username}</Select.Option>))}</Select></Form.Item>
                     </div>
                 </Form>
             </Modal>
 
-            <Modal
-                title={subConfig.type === 'keyResult' ? `Thêm kết quả cho: ${subConfig.parentTitle}` : `Thêm công việc cho: ${subConfig.parentTitle}`}
-                open={subConfig.open}
-                onCancel={() => setSubConfig(p => ({ ...p, open: false }))}
-                onOk={() => subForm.submit()}
-                okText="Lưu lại" cancelText="Hủy"
-            >
+            <Modal title={subConfig.type === 'keyResult' ? `Thêm kết quả cho: ${subConfig.parentTitle}` : `Thêm công việc cho: ${subConfig.parentTitle}`} open={subConfig.open} onCancel={() => setSubConfig(p => ({ ...p, open: false }))} onOk={() => subForm.submit()} okText="Lưu lại" cancelText="Hủy">
                 <Form form={subForm} layout="vertical" onFinish={handleSubSubmit}>
-                    <Form.Item name="title" label="Tên" rules={[{ required: true, message: 'Vui lòng nhập tên' }]}>
-                        <Input placeholder="Nhập nội dung..." />
-                    </Form.Item>
+                    <Form.Item name="title" label="Tên" rules={[{ required: true, message: 'Vui lòng nhập tên' }]}><Input placeholder="Nhập nội dung..." /></Form.Item>
                     <div style={{ display: 'flex', gap: 12 }}>
-                        <Form.Item name="deadline" label="Hạn chót" style={{ flex: 1 }}>
-                            <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} placeholder="Chọn ngày..." />
-                        </Form.Item>
-                        <Form.Item name="assignee" label="Người phụ trách" style={{ flex: 1 }}>
-                            <Select placeholder="Giao cho ai?" allowClear>
-                                {members?.map(m => (
-                                    <Select.Option key={m.user._id} value={m.user._id}>{m.user.username}</Select.Option>
-                                ))}
-                            </Select>
-                        </Form.Item>
+                        <Form.Item name="deadline" label="Hạn chót" style={{ flex: 1 }}><DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} placeholder="Chọn ngày..." /></Form.Item>
+                        <Form.Item name="assignee" label="Người phụ trách" style={{ flex: 1 }}><Select placeholder="Giao cho ai?" allowClear>{members?.map(m => (<Select.Option key={m.user._id} value={m.user._id}>{m.user.username}</Select.Option>))}</Select></Form.Item>
                     </div>
                     {subConfig.type === 'keyResult' && (
                         <div style={{ display: 'flex', gap: 12 }}>
-                            <Form.Item name="targetValue" label="Chỉ tiêu" rules={[{ required: true }]} style={{ flex: 1 }}>
-                                <Input type="number" placeholder="Ví dụ: 10" />
-                            </Form.Item>
-                            <Form.Item name="unit" label="Đơn vị" style={{ flex: 1 }}>
-                                <Input placeholder="Ví dụ: bài, API, trang..." />
-                            </Form.Item>
+                            <Form.Item name="targetValue" label="Chỉ tiêu" rules={[{ required: true }]} style={{ flex: 1 }}><Input type="number" placeholder="Ví dụ: 10" /></Form.Item>
+                            <Form.Item name="unit" label="Đơn vị" style={{ flex: 1 }}><Input placeholder="Ví dụ: bài, API, trang..." /></Form.Item>
                         </div>
                     )}
                 </Form>
             </Modal>
 
-            <Modal
-                title={`Chỉnh sửa ${ITEM_TYPE_CONFIG[editConfig.record?.itemType]?.label || ''}`}
-                open={editConfig.open}
-                onCancel={() => setEditConfig({ open: false, record: null })}
-                onOk={() => editForm.submit()}
-                okText="Cập nhật" cancelText="Hủy"
-            >
+            <Modal title={`Chỉnh sửa ${ITEM_TYPE_CONFIG[editConfig.record?.itemType]?.label || ''}`} open={editConfig.open} onCancel={() => setEditConfig({ open: false, record: null })} onOk={() => editForm.submit()} okText="Cập nhật" cancelText="Hủy">
                 <Form form={editForm} layout="vertical" onFinish={handleEditSubmit}>
-                    <Form.Item name="title" label="Tên mới" rules={[{ required: true }]}>
-                        <Input />
-                    </Form.Item>
+                    <Form.Item name="title" label="Tên mới" rules={[{ required: true }]}><Input /></Form.Item>
                     <div style={{ display: 'flex', gap: 12 }}>
-                        <Form.Item name="deadline" label="Hạn chót" style={{ flex: 1 }}>
-                            <DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} placeholder="Cập nhật lại ngày..." />
-                        </Form.Item>
-                        <Form.Item name="assignee" label="Người phụ trách" style={{ flex: 1 }}>
-                            <Select placeholder="Đổi người phụ trách" allowClear>
-                                {members?.map(m => (
-                                    <Select.Option key={m.user._id} value={m.user._id}>{m.user.username}</Select.Option>
-                                ))}
-                            </Select>
-                        </Form.Item>
+                        <Form.Item name="deadline" label="Hạn chót" style={{ flex: 1 }}><DatePicker format="DD/MM/YYYY" style={{ width: '100%' }} placeholder="Cập nhật lại ngày..." /></Form.Item>
+                        <Form.Item name="assignee" label="Người phụ trách" style={{ flex: 1 }}><Select placeholder="Đổi người phụ trách" allowClear>{members?.map(m => (<Select.Option key={m.user._id} value={m.user._id}>{m.user.username}</Select.Option>))}</Select></Form.Item>
                     </div>
-
-                    {editConfig.record?.itemType === 'objective' && (
-                        <Form.Item name="description" label="Mô tả">
-                            <Input.TextArea rows={3} />
-                        </Form.Item>
-                    )}
+                    {editConfig.record?.itemType === 'objective' && <Form.Item name="description" label="Mô tả"><Input.TextArea rows={3} /></Form.Item>}
                     {editConfig.record?.itemType === 'keyResult' && (
                         <div style={{ display: 'flex', gap: 12 }}>
-                            <Form.Item name="currentValue" label="Đạt được" style={{ flex: 1 }}>
-                                <Input type="number" />
-                            </Form.Item>
-                            <Form.Item name="targetValue" label="Chỉ tiêu" style={{ flex: 1 }}>
-                                <Input type="number" />
-                            </Form.Item>
-                            <Form.Item name="unit" label="Đơn vị" style={{ flex: 1 }}>
-                                <Input disabled />
-                            </Form.Item>
+                            <Form.Item name="currentValue" label="Đạt được" style={{ flex: 1 }}><Input type="number" /></Form.Item>
+                            <Form.Item name="targetValue" label="Chỉ tiêu" style={{ flex: 1 }}><Input type="number" /></Form.Item>
+                            <Form.Item name="unit" label="Đơn vị" style={{ flex: 1 }}><Input disabled /></Form.Item>
                         </div>
                     )}
                 </Form>
+            </Modal>
+
+            {/* 👉 3. MODAL AI ĐƯỢC CHIA THÀNH 2 MÀN HÌNH (INPUT & REVIEW) */}
+            <Modal
+                title={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6d28d9' }}>
+                        ✨ <span>Trợ lý AI phân rã công việc</span>
+                    </div>
+                }
+                open={aiConfig.open}
+                onCancel={() => !aiConfig.loading && setAiConfig({ open: false, record: null, prompt: '', loading: false, step: 'input', generatedTasks: [], aiMessage: '' })}
+                footer={null}
+                width={650}
+            >
+                <div style={{ padding: '10px 0' }}>
+                    {aiConfig.step === 'input' && (
+                        <>
+                            <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 12 }}>
+                                Hệ thống sẽ tự động tạo các công việc nhỏ cho <b>{aiConfig.record?.title}</b>.
+                            </div>
+
+                            {aiConfig.aiMessage && (
+                                <div style={{ background: '#fee2e2', color: '#991b1b', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 13 }}>
+                                    ⚠️ <b>AI phản hồi:</b> {aiConfig.aiMessage}
+                                </div>
+                            )}
+
+                            <Input.TextArea
+                                rows={4}
+                                placeholder="Ví dụ: Liệt kê các task cần thiết để làm chức năng Đăng nhập bằng Google. Yêu cầu chi tiết cả FE và BE..."
+                                value={aiConfig.prompt}
+                                onChange={e => setAiConfig(p => ({ ...p, prompt: e.target.value }))}
+                                disabled={aiConfig.loading}
+                                style={{ borderRadius: 8 }}
+                            />
+
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+                                <button
+                                    onClick={handleAIGenerate}
+                                    disabled={aiConfig.loading}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 8,
+                                        padding: '8px 16px', background: aiConfig.loading ? '#c4b5fd' : '#8b5cf6',
+                                        color: '#fff', border: 'none', borderRadius: 6, cursor: aiConfig.loading ? 'wait' : 'pointer',
+                                        fontWeight: 500
+                                    }}
+                                >
+                                    {aiConfig.loading ? '⏳ AI đang suy nghĩ (3-5s)...' : '🚀 Phân tích yêu cầu'}
+                                </button>
+                            </div>
+                        </>
+                    )}
+
+                    {aiConfig.step === 'review' && (
+                        <>
+                            <div style={{ background: '#ecfdf5', color: '#065f46', padding: '8px 12px', borderRadius: 6, marginBottom: 16, fontSize: 13 }}>
+                                ✅ <b>AI:</b> {aiConfig.aiMessage}
+                            </div>
+
+                            <div style={{ maxHeight: '350px', overflowY: 'auto', paddingRight: 5 }}>
+                                {aiConfig.generatedTasks.map((task, tIndex) => (
+                                    <div key={tIndex} style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, marginBottom: 12, background: '#f9fafb' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: task.children?.length ? 12 : 0 }}>
+                                            <Checkbox checked={task.selected} onChange={e => handleToggleAITask(tIndex, null, e.target.checked)}>
+                                                <span style={{ fontWeight: 600, fontSize: 13 }}>{task.title}</span>
+                                            </Checkbox>
+                                            <Select
+                                                size="small"
+                                                style={{ width: 140 }}
+                                                placeholder="Chưa phân công"
+                                                value={task.assignee}
+                                                onChange={v => handleAssignAITask(tIndex, null, v)}
+                                                allowClear
+                                            >
+                                                {members?.map(m => <Select.Option key={m.user._id} value={m.user._id}>{m.user.username}</Select.Option>)}
+                                            </Select>
+                                        </div>
+
+                                        {task.children?.map((child, cIndex) => (
+                                            <div key={cIndex} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginLeft: 24, paddingLeft: 12, borderLeft: '2px solid #e5e7eb', marginBottom: 8 }}>
+                                                <Checkbox checked={child.selected} onChange={e => handleToggleAITask(tIndex, cIndex, e.target.checked)}>
+                                                    <span style={{ fontSize: 13, color: '#4b5563' }}>{child.title}</span>
+                                                </Checkbox>
+                                                <Select
+                                                    size="small"
+                                                    style={{ width: 130 }}
+                                                    placeholder="Chưa phân công"
+                                                    value={child.assignee}
+                                                    onChange={v => handleAssignAITask(tIndex, cIndex, v)}
+                                                    allowClear
+                                                >
+                                                    {members?.map(m => <Select.Option key={m.user._id} value={m.user._id}>{m.user.username}</Select.Option>)}
+                                                </Select>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
+                                <button
+                                    onClick={() => setAiConfig(p => ({ ...p, step: 'input' }))}
+                                    style={{ padding: '8px 16px', background: '#fff', border: '1px solid #d1d5db', borderRadius: 6, cursor: 'pointer', fontWeight: 500 }}
+                                >
+                                    Quay lại sửa lệnh
+                                </button>
+                                <button
+                                    onClick={handleSaveAITasks}
+                                    disabled={aiConfig.loading}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: 6, cursor: aiConfig.loading ? 'wait' : 'pointer', fontWeight: 500 }}
+                                >
+                                    {aiConfig.loading ? '⏳ Đang lưu...' : '💾 Duyệt & Lưu hệ thống'}
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </div>
             </Modal>
         </div>
     );

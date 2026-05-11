@@ -4,10 +4,11 @@ const Task = require('../tasks/task.model');
 const Activity = require('../activities/activity.model');
 
 //thuat toan Mega Tree
+// Thuật toán Mega Tree (Phiên bản nâng cấp: Hỗ trợ Task n-levels)
 exports.getOkrTree = async (userId, groupId = null) => {
     const query = groupId ? { group: groupId } : { user: userId, group: null };
 
-
+    // 1. Fetch dữ liệu từ DB
     const objectives = await Objective.find(query).lean();
     const objectiveIds = objectives.map(obj => obj._id);
 
@@ -21,13 +22,33 @@ exports.getOkrTree = async (userId, groupId = null) => {
         ]
     }).lean();
 
-    const taskMap = tasks.map(task => ({ ...task, itemType: 'task' }));
+    // 2. Chuyển đổi và thêm thuộc tính cần thiết
+    // Đảm bảo mọi node đều có mảng children trống
+    const taskMap = tasks.map(task => ({ ...task, itemType: 'task', children: [] }));
     const krMap = keyResults.map(kr => ({ ...kr, itemType: 'keyResult', children: [] }));
     const objMap = objectives.map(obj => ({ ...obj, itemType: 'objective', children: [] }));
 
-    //1. gan Task con vao` Task cha
-    //2. gan Task vao KeyResult
+    // 3. THUẬT TOÁN ĐỆ QUY LỒNG TASK (Mấu chốt của vấn đề)
+    const taskRoots = []; // Mảng chứa những Task Level 1 (Không có cha)
+
     taskMap.forEach(task => {
+        if (task.parent) {
+            // Nếu có cha -> Tìm cha nó và nhét nó vào bụng cha
+            const parentTask = taskMap.find(t => t._id.toString() === task.parent.toString());
+            if (parentTask) {
+                parentTask.children.push(task);
+            } else {
+                // Nếu DB lỗi mất cha, tạm coi nó là rễ
+                taskRoots.push(task);
+            }
+        } else {
+            // Nếu KHÔNG có cha (parent = null) -> Nó là gốc rễ (Level 1)
+            taskRoots.push(task);
+        }
+    });
+
+    // 4. Nhét Task Level 1 vào bụng KeyResult (Hoặc Objective)
+    taskRoots.forEach(task => {
         if (task.keyResult) {
             const kr = krMap.find(k => k._id.toString() === task.keyResult.toString());
             if (kr) kr.children.push(task);
@@ -37,13 +58,13 @@ exports.getOkrTree = async (userId, groupId = null) => {
         }
     });
 
-    //3. gan KeyResult vao Objective
+    // 5. Nhét KeyResult vào bụng Objective
     krMap.forEach(kr => {
         const obj = objMap.find(o => o._id.toString() === kr.objective.toString());
         if (obj) obj.children.push(kr);
     });
 
-    //tra ve mang Objective chua day du thong tin
+    // Trả về Cây Objective đã được phân tầng hoàn hảo
     return objMap;
 };
 

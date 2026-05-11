@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Modal, Form, Input, message, Avatar, List, Popconfirm, Tag, Spin, Dropdown, Badge } from 'antd';
-import { PlusOutlined, TeamOutlined, DeleteOutlined, ProjectOutlined, MessageOutlined, BarChartOutlined, UserAddOutlined, LogoutOutlined, MoreOutlined, AppstoreOutlined } from '@ant-design/icons';
+import { Modal, Form, Input, message, Avatar, Popconfirm, Spin, Dropdown, Badge } from 'antd';
+import { PlusOutlined, TeamOutlined, DeleteOutlined, ProjectOutlined, MessageOutlined, BarChartOutlined, UserAddOutlined, LogoutOutlined, AppstoreOutlined } from '@ant-design/icons';
 import api from '../utils/api';
 import { useNavigate } from 'react-router-dom';
 import Dashboard from './Dashboard';
@@ -8,8 +8,8 @@ import ReportDashboard from '../components/ReportDashboard';
 import ChatBox from '../components/ChatBox';
 import KanbanBoard from '../components/KanbanBoard';
 import Activities from './Activities';
+import NotificationBell from '../components/NotificationBell';
 import socket from '../utils/socket';
-
 
 const Workspace = () => {
     const [groups, setGroups] = useState([]);
@@ -79,7 +79,7 @@ const Workspace = () => {
     const handleAddMember = async (values) => {
         try {
             await api.post(`/groups/${activeGroup._id}/members`, { email: values.email });
-            message.success('Đã thêm thành viên thành công');
+            message.success('Đã gửi lời mời thành công');
             setIsAddMemberModalOpen(false);
             memberForm.resetFields();
             fetchGroupDetails(activeGroup._id);
@@ -98,7 +98,20 @@ const Workspace = () => {
         }
     };
 
+    // 👉 HÀM MỚI: Rời dự án cho thành viên
+    const handleLeaveGroup = async () => {
+        try {
+            await api.delete(`/groups/${activeGroup._id}/leave`);
+            message.success('Bạn đã rời khỏi dự án thành công!');
+            setActiveGroup(null);
+            fetchGroups();
+        } catch (error) {
+            message.error(error.response?.data?.message || 'Lỗi khi rời nhóm');
+        }
+    };
+
     const handleLogout = () => {
+        socket.disconnect();
         localStorage.removeItem('accessToken');
         localStorage.removeItem('user');
         navigate('/login');
@@ -112,22 +125,11 @@ const Workspace = () => {
 
     const tabs = [
         { key: '1', icon: <ProjectOutlined />, label: 'Công việc', content: <Dashboard groupId={activeGroup?._id} members={activeGroup?.members} /> },
-
         { key: '1.5', icon: <AppstoreOutlined />, label: 'Bảng Kanban', content: <KanbanBoard groupId={activeGroup?._id} members={activeGroup?.members} /> },
-        {
-            key: '2',
-            icon: <MessageOutlined />,
-            label: 'Trò chuyện',
-            badge: unreadCounts[activeGroup?._id] || 0,
-            content: <ChatBox groupId={activeGroup?._id} />
-        },
+        { key: '2', icon: <MessageOutlined />, label: 'Trò chuyện', badge: unreadCounts[activeGroup?._id] || 0, content: <ChatBox groupId={activeGroup?._id} /> },
         { key: '3', icon: <TeamOutlined />, label: 'Thành viên', content: null },
         { key: '4', icon: <BarChartOutlined />, label: 'Hoạt động', content: <Activities groupId={activeGroup?._id} /> },
-        {
-            key: '5',
-            label: <span><ProjectOutlined /> Báo cáo</span>, // Thêm icon tùy thích
-            children: <ReportDashboard groupId={activeGroup?._id} />
-        },
+        { key: '5', label: <span><ProjectOutlined /> Báo cáo</span>, children: <ReportDashboard groupId={activeGroup?._id} /> },
     ];
 
     const MemberPanel = () => (
@@ -136,14 +138,27 @@ const Workspace = () => {
                 <span style={{ fontSize: 14, fontWeight: 500, color: '#111827' }}>
                     Thành viên ({activeGroup.members?.length || 0})
                 </span>
-                {amIAdmin && (
-                    <button
-                        onClick={() => setIsAddMemberModalOpen(true)}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
-                    >
-                        <UserAddOutlined style={{ fontSize: 12 }} /> Thêm thành viên
-                    </button>
-                )}
+
+                {/* Khu vực nút bấm */}
+                <div style={{ display: 'flex', gap: 8 }}>
+                    {amIAdmin && (
+                        <button
+                            onClick={() => setIsAddMemberModalOpen(true)}
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}
+                        >
+                            <UserAddOutlined style={{ fontSize: 12 }} /> Thêm thành viên
+                        </button>
+                    )}
+
+                    {/* 👉 NÚT RỜI DỰ ÁN CHO THÀNH VIÊN */}
+                    {!amIAdmin && (
+                        <Popconfirm title="Xác nhận rời dự án" description="Bạn sẽ mất quyền truy cập vào công việc." onConfirm={handleLeaveGroup} okText="Rời đi" cancelText="Hủy" okButtonProps={{ danger: true }}>
+                            <button style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', background: '#fff', color: '#ef4444', border: '1px solid #fca5a5', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                                <LogoutOutlined style={{ fontSize: 12 }} /> Rời dự án
+                            </button>
+                        </Popconfirm>
+                    )}
+                </div>
             </div>
             {(activeGroup.members || []).map(item => {
                 const isAdmin = item.role === 'admin';
@@ -238,17 +253,25 @@ const Workspace = () => {
                     )}
                 </div>
 
-                <Dropdown menu={userMenu} placement="topLeft" trigger={['click']}>
-                    <div style={{ padding: '10px 12px', borderTop: '0.5px solid rgba(255,255,255,0.07)', background: 'rgba(0,0,0,0.2)', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                        <Avatar src={currentUser.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${currentUser.username}`} style={{ width: 30, height: 30, flexShrink: 0 }} />
-                        <div style={{ flex: 1, overflow: 'hidden' }}>
-                            <div style={{ fontSize: 12, fontWeight: 500, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser.username}</div>
-                            <div style={{ fontSize: 11, color: '#34d399', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                <span style={{ width: 5, height: 5, background: '#34d399', borderRadius: '50%', display: 'inline-block' }} /> Trực tuyến
+                {/* 👉 VỊ TRÍ MỚI CỦA CHUÔNG BÁO VÀ AVATAR */}
+                <div style={{ padding: '10px 12px', borderTop: '0.5px solid rgba(255,255,255,0.07)', background: 'rgba(0,0,0,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Dropdown menu={userMenu} placement="topLeft" trigger={['click']}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', flex: 1, minWidth: 0 }}>
+                            <Avatar src={currentUser.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${currentUser.username}`} style={{ width: 30, height: 30, flexShrink: 0 }} />
+                            <div style={{ flex: 1, overflow: 'hidden' }}>
+                                <div style={{ fontSize: 12, fontWeight: 500, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{currentUser.username}</div>
+                                <div style={{ fontSize: 11, color: '#34d399', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <span style={{ width: 5, height: 5, background: '#34d399', borderRadius: '50%', display: 'inline-block' }} /> Trực tuyến
+                                </div>
                             </div>
                         </div>
+                    </Dropdown>
+
+                    {/* Chuông được đặt chung một hàng với Avatar */}
+                    <div style={{ flexShrink: 0, marginLeft: 8 }}>
+                        <NotificationBell />
                     </div>
-                </Dropdown>
+                </div>
             </div>
 
             {/* MAIN */}
@@ -316,7 +339,7 @@ const Workspace = () => {
                 </Form>
             </Modal>
 
-            <Modal title="Thêm thành viên" open={isAddMemberModalOpen} onCancel={() => setIsAddMemberModalOpen(false)} onOk={() => memberForm.submit()} okText="Thêm" cancelText="Hủy">
+            <Modal title="Thêm thành viên" open={isAddMemberModalOpen} onCancel={() => setIsAddMemberModalOpen(false)} onOk={() => memberForm.submit()} okText="Gửi lời mời" cancelText="Hủy">
                 <Form form={memberForm} layout="vertical" onFinish={handleAddMember}>
                     <Form.Item name="email" label="Email thành viên" rules={[{ required: true, type: 'email', message: 'Vui lòng nhập đúng định dạng email' }]}>
                         <Input placeholder="vd: nguyen.van.a@company.vn" />

@@ -100,9 +100,8 @@ exports.updateObjective = async (req, res) => {
 
 exports.deleteObjective = async (req, res) => {
     try {
-        const groupId = req.query.groupId || req.body?.groupId; // Lấy groupId từ query
+        const groupId = req.query.groupId || req.body?.groupId;
 
-        // Lấy tên objective để log cho đẹp trước khi xóa
         const objToDelete = await Objective.findById(req.params.id);
         const objTitle = objToDelete ? objToDelete.title : "Mục tiêu";
 
@@ -112,9 +111,9 @@ exports.deleteObjective = async (req, res) => {
             req.user.id,
             'DELETE',
             'Objective',
-            req.params.id, // 👉 Tham số này của bạn đang bị thiếu ở bản cũ
+            req.params.id,
             `Đã xóa mục tiêu: "${objTitle}"`,
-            groupId // 👉 Bổ sung groupId để hiện Log
+            groupId
         );
 
         res.status(200).json(result);

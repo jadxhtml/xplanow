@@ -50,6 +50,7 @@ const io = new Server(server, {
     }
 });
 
+app.set('io', io);
 global.io = io;
 io.on('connection', (socket) => {
     console.log(`Một user vừa kết nối: ${socket.id}`);
@@ -63,7 +64,7 @@ io.on('connection', (socket) => {
 
     socket.on('send_message', async (data) => {
         try {
-            console.log("📥 [SOCKET] Backend nhận được tin nhắn cần lưu:", data);
+            // console.log("📥 [SOCKET] Backend nhận được tin nhắn cần lưu:", data);
 
             const Message = require('./modules/messages/message.model'); // Trỏ lại đúng đường dẫn file model của bạn
 
@@ -74,7 +75,8 @@ io.on('connection', (socket) => {
                 message: data.message || "",     // Có thể rỗng nếu chỉ gửi ảnh
                 type: data.type || 'text',       // 👉 Thêm trường type
                 fileUrl: data.fileUrl || null,   // 👉 Thêm fileUrl
-                fileName: data.fileName || null
+                fileName: data.fileName || null,
+                replyToId: data.replyToId
             });
 
             console.log("✅ [DB] Đã lưu tin nhắn vào MongoDB thành công!");
@@ -102,9 +104,19 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log(`User đã ngắt kết nối: ${socket.id}`);
     });
+
+    socket.on('send_reaction', (data) => {
+        socket.to(data.groupId).emit('receive_reaction', data);
+    });
+
+    socket.on('setup', (userId) => {
+        socket.join(userId); // Cho user vào cái phòng có tên là ID của chính họ
+        console.log(`👤 User ${userId} đã sẵn sàng nhận thông báo cá nhân!`);
+    });
 });
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
     console.log(`server is running on port ${PORT}`)
 })
+

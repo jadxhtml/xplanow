@@ -13,6 +13,7 @@ const conversationRoutes = require('./modules/conversations/conversation.route')
 const userRoutes = require('./modules/users/user.route');
 const messageRoutes = require('./modules/messages/message.route');
 const reportRoutes = require('./modules/reports/report.route');
+const notificationRoutes = require('./modules/notifications/notification.route');
 const path = require('path');
 
 
@@ -23,7 +24,6 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 app.use(morgan('dev'));
-
 
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
@@ -38,6 +38,7 @@ app.use('/api/conversations', conversationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 
 module.exports = app;
